@@ -1,8 +1,8 @@
 //By: Gali Hacohen, Noah Buenaventura
+//Noah's Notes: State controller is next, then attachinterrupt for the On/Off button. Also handle GPIO for LED's
 
 #include <DHT.h>
-#include <TinyLiquidCrystal_I2C.h>
-
+#include <LiquidCrystal.h>
 
 //POINTERS
 
@@ -19,22 +19,26 @@ volatile unsigned char *myUDR0   = (unsigned char *)0x00C6;
 // Initialize the DHT sensor
 DHT dht(DHTPIN, DHTTYPE);
 
-TinyLiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal lcd(0x27, 16, 2);
 
-
-// LCD STUFF 
 void setup() {
   U0init(9600);
   dht.begin();
   
-
   lcd.begin();
   lcd.backlight();
   lcd.setCursor(0, 0);
-
+  //attach.interrupt();
 }
 
 void loop() {
+  //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
+  volatile int state = 0;
+ /* switch (state) [
+    case "0":
+
+  ]*/
+
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
 

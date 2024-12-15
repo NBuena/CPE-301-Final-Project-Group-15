@@ -1,7 +1,8 @@
 //By: Gali Hacohen, Noah Buenaventura
-//Noah's Notes: State controller is next, then attachinterrupt for the On/Off button.
-
-//#include <DHT.h>
+//Noah's Notes: State Controller working, attachInterrupt working, LED's working. DHT working, need to change from serial monitor output to LCD output.
+//Having trouble writing using RTC to write to serial monitor w/o using serial library
+#include <RTClib.h>
+#include <dht.h>
 #include <LiquidCrystal.h>
 #include <Stepper.h>
 
@@ -14,10 +15,11 @@ volatile unsigned int  *myUBRR0  = (unsigned int *) 0x00C4;
 volatile unsigned char *myUDR0   = (unsigned char *)0x00C6;
 #define RDA 0x80
 #define TBE 0x20 
-/*Temperature
-#define DHTPIN 2        
-#define DHTTYPE DHT22
-*/
+//DHT sensor
+#define DHTPIN 10       
+dht DHT;
+unsigned long millisDHT = 0;
+const long intervalDHT = 60000;
 /*LED pin #'s
 LED_yellow pin 9 [PH6]
 LED_blue pin 8 [PH5]
@@ -26,38 +28,48 @@ LED_green pin 6 [PH3]
 */
 volatile unsigned char* ddr_h = (unsigned char*) 0x101;
 volatile unsigned char* port_h = (unsigned char*) 0x102;
+//On/Off Button
+volatile unsigned char* ddr_e = (unsigned char*) 0x2D;
+volatile unsigned char* port_e = (unsigned char*) 0x2E;
+const byte togglePin = 2;
+//RTC
+RTC_DS1307 rtc;
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 // Stepper motor
 #define stepper_revs (2038)
-      
-/* Initialize the DHT sensor
-DHT dht(DHTPIN, DHTTYPE);
-
+/*
 LiquidCrystal lcd(0x27, 16, 2);
 */
 //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
 volatile unsigned int state = 0;
+volatile unsigned char read;
 
 void setup() {
   //Serial Init
   U0init(9600);
+  //RTC Init
+  rtc.begin();
+  DateTime now = rtc.now();
+  read = now.year()/1000;
+  U0putchar(read);
+  //On/Off Button Init
+  *ddr_e &= (0xEF);
+  *port_e |= (0x10);
   //LED Init
   *ddr_h |= (0x78);
-  *port_h &= (0x00);
-  *port_h |= (0x01 << 6);
-  /*DHT Init
-  dht.begin();
-  //Stepper Motor Init
+  /*Stepper Motor Init
   stepper(stepper_revs, 22,24,26,28);
   stepper. setspeed(50);
   //LCD Init
   lcd.begin();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  //attach.interrupt();
   */
+  attachInterrupt(digitalPinToInterrupt(togglePin), Toggle, FALLING);
 }
 
 void loop() {
+  unsigned long currentMillis = millis();
   switch (state) {
     case 0:
       //yellow LED ON
@@ -79,6 +91,17 @@ void loop() {
       *port_h &= (0x00);
       *port_h |= (0x01 << 4);
       break;
+  }
+  if (state != 0 && state != 3) {
+    if (currentMillis - millisDHT >= intervalDHT) {
+      millisDHT = currentMillis;
+      int chk = DHT.read11(DHTPIN);
+      Serial.print("Temperature = ");
+      Serial.println(DHT.temperature);
+      Serial.print("Humidity = ");
+      Serial.println(DHT.humidity);
+    }
+    
   }
   /*
   float temperature = dht.readTemperature();
@@ -158,6 +181,75 @@ void U0putchar(unsigned char U0pdata)
 {
   while(!( *myUCSR0A  & (1 << 5)));
   *myUDR0  = U0pdata;
+}
+/*
+void RTCLog(DateTime time, volatile unsigned int transition) {
+  U0putchar('S');
+  U0putchar('y');
+  U0putchar('s');
+  U0putchar('t');
+  U0putchar('e');
+  U0putchar('m');
+  U0putchar(' ');
+  U0putchar('c');
+  U0putchar('h');
+  U0putchar('a');
+  U0putchar('n');
+  U0putchar('g');
+  U0putchar('e');
+  U0putchar('d');
+  U0putchar(' ');
+  U0putchar('t');
+  U0putchar('o');
+  U0putchar(' ');
+  switch(transition) {
+    case 0:
+      U0putchar('D');
+      U0putchar('I');
+      U0putchar('S');
+      U0putchar('A');
+      U0putchar('B');
+      U0putchar('L');
+      U0putchar('E');
+      U0putchar('D');
+      break;
+    case 1:
+      U0putchar('I');
+      U0putchar('D');
+      U0putchar('L');
+      U0putchar('E');
+      break;
+    case 2:
+      U0putchar('R');
+      U0putchar('U');
+      U0putchar('N');
+      U0putchar('N');
+      U0putchar('I');
+      U0putchar('N');
+      U0putchar('G');
+      break;
+    case 3:
+      U0putchar('E');
+      U0putchar('R');
+      U0putchar('R');
+      U0putchar('O');
+      U0putchar('R');
+      break;
+  }
+  U0putchar(' ');
+  U0putchar('a');
+  U0putchar('t');
+  U0putchar(' ');
+  read = time.year()
+}*/
+//Toggles Between DISABLED state and ON.
+//Pressing the button in any other state than DISABLED will set state to DISABLED
+//Pressing the button in DISABLED sets state to IDLE
+void Toggle () {
+  state += 1;
+  if (state > 1) {
+    state = 0;
+  }
 }
 
 //TESTING

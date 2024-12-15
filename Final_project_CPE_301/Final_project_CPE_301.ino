@@ -34,6 +34,8 @@ DHT dht(DHTPIN, DHTTYPE);
 
 LiquidCrystal lcd(0x27, 16, 2);
 */
+//Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
+volatile unsigned int state = 0;
 
 void setup() {
   //Serial Init
@@ -56,12 +58,28 @@ void setup() {
 }
 
 void loop() {
-  //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
-  volatile int state = 0;
-  //switch (state) {
-  //  case "0":
-
-  //}
+  switch (state) {
+    case 0:
+      //yellow LED ON
+      *port_h &= (0x00);
+      *port_h |= (0x01 << 6);
+      break;
+    case 1:
+      //green LED ON
+      *port_h &= (0x00);
+      *port_h |= (0x01 << 3);
+      break;
+    case 2:
+      //blue LED ON
+      *port_h &= (0x00);
+      *port_h |= (0x01 << 5);
+      break;
+    case 3:
+      //red LED ON
+      *port_h &= (0x00);
+      *port_h |= (0x01 << 4);
+      break;
+  }
   /*
   float temperature = dht.readTemperature();
   float humidity = dht.readHumidity();
@@ -158,4 +176,11 @@ void U0putchar(unsigned char U0pdata)
   *port_h |= (0x01 << 6);
   delay(500);
 */
-
+//STATE MACHINE
+/*
+  testing state machine
+  state += 1;
+  if(state > 3) {
+  state = 0; 
+  }
+*/

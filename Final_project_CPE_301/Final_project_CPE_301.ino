@@ -37,9 +37,10 @@ RTC_DS1307 rtc;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 // Stepper motor
 #define stepper_revs (2038)
-/*
-LiquidCrystal lcd(0x27, 16, 2);
-*/
+//LCD
+const int RS = 52, EN = 53, D4 = 48, D5 = 49, D6 = 50, D7 = 51;
+LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
+
 //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
 volatile unsigned int state = 0;
 volatile unsigned char read;
@@ -59,12 +60,11 @@ void setup() {
   *ddr_h |= (0x78);
   /*Stepper Motor Init
   stepper(stepper_revs, 22,24,26,28);
-  stepper. setspeed(50);
+  stepper. setspeed(50);*/
   //LCD Init
-  lcd.begin();
-  lcd.backlight();
+  lcd.begin(16, 2);
   lcd.setCursor(0, 0);
-  */
+  
   attachInterrupt(digitalPinToInterrupt(togglePin), Toggle, FALLING);
 }
 
@@ -75,6 +75,7 @@ void loop() {
       //yellow LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 6);
+      lcd.clear();
       break;
     case 1:
       //green LED ON
@@ -90,16 +91,25 @@ void loop() {
       //red LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 4);
+      lcd.clear();
+      lcd.setCursor(0,0);
+      lcd.write("ERROR: LOW WATER");
+      lcd.setCursor(0,1);
+      lcd.write("REFILL & RESET!");
       break;
   }
   if (state != 0 && state != 3) {
     if (currentMillis - millisDHT >= intervalDHT) {
       millisDHT = currentMillis;
       int chk = DHT.read11(DHTPIN);
-      Serial.print("Temperature = ");
-      Serial.println(DHT.temperature);
-      Serial.print("Humidity = ");
-      Serial.println(DHT.humidity);
+      lcd.setCursor(0,0);
+      lcd.write("Temp: ");
+      lcd.print(DHT.temperature);
+      lcd.write("C");
+      lcd.setCursor(0,1);
+      lcd.write("Humidity: ");
+      lcd.print(DHT.humidity);
+      lcd.write("%");
     }
     
   }

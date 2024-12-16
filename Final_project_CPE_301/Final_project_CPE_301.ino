@@ -59,7 +59,7 @@ const int water_sensor_channel = 15;
 const int waterThreshold = 100;
 //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
 volatile unsigned int state = 0;
-volatile unsigned char read;
+volatile unsigned int logState = 1;
 
 void setup() {
   //Serial Init
@@ -69,9 +69,6 @@ void setup() {
   *ddr_l |= (0x08);
   //RTC Init
   rtc.begin();
-  DateTime now = rtc.now();
-  read = now.year()/1000;
-  U0putchar(read);
   //On/Off Button Init
   *ddr_e &= (0xEF);
   *port_e |= (0x10);
@@ -101,6 +98,11 @@ void loop() {
       //yellow LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 6);
+      if (state != logState) {
+        DateTime now = rtc.now();
+        RTCLog(now, state);
+        logState = state;
+      }
       lcd.clear();
       millisDHT = 0;
       millisEr = 0;
@@ -110,34 +112,49 @@ void loop() {
       //green LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 3);
+      if (state != logState) {
+        DateTime now = rtc.now();
+        RTCLog(now, state);
+        logState = state;
+      }
       break;
     case 2:
       //blue LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 5);
       *port_h |= (0x01);
+      if (state != logState) {
+        DateTime now = rtc.now();
+        RTCLog(now, state);
+        logState = state;
+      }
+      if (DHT.temperature <= 27) {
+      state = 1;
+      }
       break;
     case 3:
       //red LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 4);
-      if (currentMillis - millisEr >= intervalDHT || millisEr == 0) {
-        millisEr = currentMillis;
+      if (state != logState) {
+        DateTime now = rtc.now();
+        RTCLog(now, state);
         lcd.clear();
         lcd.setCursor(0,0);
         lcd.write("ERROR: LOW WATER");
         lcd.setCursor(0,1);
         lcd.write("REFILL & RESET!");
+        logState = state;
       }
       break;
   }
-  if (state != 0) {
+  if (state != 3) {
     if (*pin_g &= (0x01)) {
       daStepper.step(5);
     } else if (*pin_g &= (0x02)) {
       daStepper.step(-5);
     }
-    if (state != 3) {
+    if (state != 0) {
     if ( millisDHT == 0 || currentMillis - millisDHT >= intervalDHT) {
       millisDHT = currentMillis;
       int chk = DHT.read11(DHTPIN);
@@ -150,23 +167,16 @@ void loop() {
       lcd.write("Humidity: ");
       lcd.print(DHT.humidity);
       lcd.write("%");
-    }
-    if (currentMillis - millisWat >= intervalWat || millisWat == 0) {
-      millisWat = currentMillis;
-      if (water_sensor_read(water_sensor_channel) < waterThreshold) {
-        state = 3;
+      if (DHT.temperature > 27 && state !=2) {
+      state = 2;
       }
     }
+      if (water_sensor_read(water_sensor_channel) < waterThreshold) {
+        state = 3;
+        return 0;
+      }
     }
   }
-  //USART EXAMPLE CODE -----
-  /*
-  unsigned char cs1;
-  while (U0kbhit()==0){}; // wait for RDA = true
-  cs1 = U0getchar();    // read character
-  U0putchar(cs1);     // echo character
-  */
-
 }
 
 // function to initialize USART0 to "int" Baud, 8 data bits,
@@ -245,7 +255,7 @@ unsigned int water_sensor_read(unsigned char sensor_channel)
   //set VCC pin to low
   *port_l &= ~(0x08);
 }
-/*
+
 void RTCLog(DateTime time, volatile unsigned int transition) {
   U0putchar('S');
   U0putchar('y');
@@ -303,8 +313,21 @@ void RTCLog(DateTime time, volatile unsigned int transition) {
   U0putchar('a');
   U0putchar('t');
   U0putchar(' ');
-  read = time.year()
-}*/
+  Serial.print(time.hour(), DEC);
+  Serial.print(':');
+  Serial.print(time.minute(), DEC);
+  Serial.print(':');
+  Serial.print(time.second(), DEC);
+  Serial.print(", ");
+  Serial.print(daysOfTheWeek[time.dayOfTheWeek()]);
+  Serial.print(", ");
+  Serial.print(time.month(), DEC);
+  Serial.print('/');
+  Serial.print(time.day(), DEC);
+  Serial.print('/');
+  Serial.print(time.year(), DEC);
+  Serial.print('\n');
+}
 //Toggles Between DISABLED state and ON.
 //Pressing the button in any other state than DISABLED will set state to DISABLED
 //Pressing the button in DISABLED sets state to IDLE

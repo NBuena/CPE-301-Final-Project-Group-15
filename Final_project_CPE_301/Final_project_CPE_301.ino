@@ -40,7 +40,11 @@ const byte resetPin = 3;
 RTC_DS1307 rtc;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 // Stepper motor
-#define stepper_revs (2038)
+const int stepper_revs = 2038;
+Stepper daStepper = Stepper(stepper_revs, 42, 44, 43, 45);
+volatile unsigned char* ddr_g = (unsigned char*) 0x33;
+volatile unsigned char* port_g = (unsigned char*) 0x34;
+volatile unsigned char* pin_g = (unsigned char*) 0x32;
 //LCD
 const int RS = 52, EN = 53, D4 = 48, D5 = 49, D6 = 50, D7 = 51;
 LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
@@ -53,7 +57,6 @@ volatile unsigned char* ddr_l = (unsigned char*) 0x10A;
 volatile unsigned char* port_l = (unsigned char*) 0x10B;
 const int water_sensor_channel = 15;
 const int waterThreshold = 100;
-
 //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
 volatile unsigned int state = 0;
 volatile unsigned char read;
@@ -77,12 +80,16 @@ void setup() {
   *port_e |= (0x20);
   //LED Init
   *ddr_h |= (0x78);
-  /*Stepper Motor Init
-  stepper(stepper_revs, 22,24,26,28);
-  stepper. setspeed(50);*/
+  //DC Motor Init
+  *ddr_h |= (0x01);
+  //Stepper Motor Init
+  daStepper.setSpeed(10);
+  *ddr_g &= (0xFC);
+  *port_g &= (0xFC);
   //LCD Init
   lcd.begin(16, 2);
   lcd.setCursor(0, 0);
+  //attach Interrupts
   attachInterrupt(digitalPinToInterrupt(togglePin), Toggle, FALLING);
   attachInterrupt(digitalPinToInterrupt(resetPin), Reset, FALLING);
 }
@@ -108,6 +115,7 @@ void loop() {
       //blue LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 5);
+      *port_h |= (0x01);
       break;
     case 3:
       //red LED ON
@@ -123,7 +131,13 @@ void loop() {
       }
       break;
   }
-  if (state != 0 && state != 3) {
+  if (state != 0) {
+    if (*pin_g &= (0x01)) {
+      daStepper.step(5);
+    } else if (*pin_g &= (0x02)) {
+      daStepper.step(-5);
+    }
+    if (state != 3) {
     if ( millisDHT == 0 || currentMillis - millisDHT >= intervalDHT) {
       millisDHT = currentMillis;
       int chk = DHT.read11(DHTPIN);
@@ -142,6 +156,7 @@ void loop() {
       if (water_sensor_read(water_sensor_channel) < waterThreshold) {
         state = 3;
       }
+    }
     }
   }
   //USART EXAMPLE CODE -----

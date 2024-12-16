@@ -1,5 +1,5 @@
 //By: Gali Hacohen, Noah Buenaventura
-//Noah's Notes: State Controller working, attachInterrupt working, LED's working. DHT working, need to change from serial monitor output to LCD output.
+//Noah's Notes: Water Level Sensor Working. Need to implement Fan Motor, Vent Motor, and RTC logging
 //Having trouble writing using RTC to write to serial monitor w/o using serial library
 #include <RTClib.h>
 #include <dht.h>
@@ -19,7 +19,10 @@ volatile unsigned char *myUDR0   = (unsigned char *)0x00C6;
 #define DHTPIN 10       
 dht DHT;
 unsigned long millisDHT = 0;
+unsigned long millisEr = 0;
+unsigned long millisWat = 0;
 const long intervalDHT = 60000;
+const long intervalWat = 1000;
 /*LED pin #'s
 LED_yellow pin 9 [PH6]
 LED_blue pin 8 [PH5]
@@ -32,6 +35,7 @@ volatile unsigned char* port_h = (unsigned char*) 0x102;
 volatile unsigned char* ddr_e = (unsigned char*) 0x2D;
 volatile unsigned char* port_e = (unsigned char*) 0x2E;
 const byte togglePin = 2;
+const byte resetPin = 3;
 //RTC
 RTC_DS1307 rtc;
 char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
@@ -40,6 +44,15 @@ char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursd
 //LCD
 const int RS = 52, EN = 53, D4 = 48, D5 = 49, D6 = 50, D7 = 51;
 LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
+//Water Sensor
+volatile unsigned char* my_ADMUX = (unsigned char*) 0x7C;
+volatile unsigned char* my_ADCSRB = (unsigned char*) 0x7B;
+volatile unsigned char* my_ADCSRA = (unsigned char*) 0x7A;
+volatile unsigned int* my_ADC_DATA = (unsigned int*) 0x78;
+volatile unsigned char* ddr_l = (unsigned char*) 0x10A;
+volatile unsigned char* port_l = (unsigned char*) 0x10B;
+const int water_sensor_channel = 15;
+const int waterThreshold = 100;
 
 //Used for control over states of the cooler 0 = Disabled; 1 = Idle; 2 = Running; 3 = Error
 volatile unsigned int state = 0;
@@ -48,6 +61,9 @@ volatile unsigned char read;
 void setup() {
   //Serial Init
   U0init(9600);
+  //Analog Init
+  adc_init(water_sensor_channel);
+  *ddr_l |= (0x08);
   //RTC Init
   rtc.begin();
   DateTime now = rtc.now();
@@ -56,6 +72,9 @@ void setup() {
   //On/Off Button Init
   *ddr_e &= (0xEF);
   *port_e |= (0x10);
+  //Reset Button Init
+  *ddr_e &= (0xDF);
+  *port_e |= (0x20);
   //LED Init
   *ddr_h |= (0x78);
   /*Stepper Motor Init
@@ -64,8 +83,8 @@ void setup() {
   //LCD Init
   lcd.begin(16, 2);
   lcd.setCursor(0, 0);
-  
   attachInterrupt(digitalPinToInterrupt(togglePin), Toggle, FALLING);
+  attachInterrupt(digitalPinToInterrupt(resetPin), Reset, FALLING);
 }
 
 void loop() {
@@ -76,6 +95,9 @@ void loop() {
       *port_h &= (0x00);
       *port_h |= (0x01 << 6);
       lcd.clear();
+      millisDHT = 0;
+      millisEr = 0;
+      millisWat = 0;
       break;
     case 1:
       //green LED ON
@@ -91,17 +113,21 @@ void loop() {
       //red LED ON
       *port_h &= (0x00);
       *port_h |= (0x01 << 4);
-      lcd.clear();
-      lcd.setCursor(0,0);
-      lcd.write("ERROR: LOW WATER");
-      lcd.setCursor(0,1);
-      lcd.write("REFILL & RESET!");
+      if (currentMillis - millisEr >= intervalDHT || millisEr == 0) {
+        millisEr = currentMillis;
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.write("ERROR: LOW WATER");
+        lcd.setCursor(0,1);
+        lcd.write("REFILL & RESET!");
+      }
       break;
   }
   if (state != 0 && state != 3) {
-    if (currentMillis - millisDHT >= intervalDHT) {
+    if ( millisDHT == 0 || currentMillis - millisDHT >= intervalDHT) {
       millisDHT = currentMillis;
       int chk = DHT.read11(DHTPIN);
+      lcd.clear();
       lcd.setCursor(0,0);
       lcd.write("Temp: ");
       lcd.print(DHT.temperature);
@@ -111,36 +137,13 @@ void loop() {
       lcd.print(DHT.humidity);
       lcd.write("%");
     }
-    
+    if (currentMillis - millisWat >= intervalWat || millisWat == 0) {
+      millisWat = currentMillis;
+      if (water_sensor_read(water_sensor_channel) < waterThreshold) {
+        state = 3;
+      }
+    }
   }
-  /*
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
-
-  // Check if any reading failed
-  if (isnan(temperature) || isnan(humidity)) {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Error: Sensor");
-    lcd.setCursor(0, 1);
-    lcd.print("Read Failed");
-    return;
-  }
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Temp: ");
-  lcd.print(temperature);
-  lcd.print("C");
-
-  lcd.setCursor(0, 1);
-  lcd.print("Humidity: ");
-  lcd.print(humidity);
-  lcd.print("%");
-
-  delay(1000);
-  */
-
   //USART EXAMPLE CODE -----
   /*
   unsigned char cs1;
@@ -179,18 +182,53 @@ unsigned char U0kbhit()
 unsigned char U0getchar()
 {
   return *myUDR0;
-  /*
-   unsigned char fly;
-   fly = *myUDR0;
-   return fly;
-  */
 }
 
 // Wait for USART0 (myUCSR0A) TBE to be set then write character to transmit buffer
 void U0putchar(unsigned char U0pdata)
 {
-  while(!( *myUCSR0A  & (1 << 5)));
+  while((*myUCSR0A & TBE)==0);
   *myUDR0  = U0pdata;
+}
+void adc_init(unsigned char sensor_channel)
+{
+  // setup the A register
+  *my_ADCSRA |= 0b10000000; // set bit   7 to 1 to enable the ADC
+  *my_ADCSRA &= 0b11011111; // clear bit 6 to 0 to disable the ADC trigger mode
+  *my_ADCSRA &= 0b11110111; // clear bit 5 to 0 to disable the ADC interrupt
+  *my_ADCSRA &= 0b11111000; // clear bit 0-2 to 0 to set prescaler selection to slow reading
+  // setup the B register
+  *my_ADCSRB &= 0b11110111; // clear bit 3 to 0 to reset the channel and gain bits
+  *my_ADCSRB &= 0b11111000; // clear bit 2-0 to 0 to set free running mode
+  // setup the MUX Register
+  *my_ADMUX  &= 0b01111111; // clear bit 7 to 0 for AVCC analog reference
+  *my_ADMUX  |= 0b01000000; // set bit   6 to 1 for AVCC analog reference
+  *my_ADMUX  &= 0b11011111; // clear bit 5 to 0 for right adjust result
+  *my_ADMUX  &= 0b11100000; // clear bit 4-0 to 0 to reset the channel and gain bits
+  // set the channel number
+  if(sensor_channel > 7)
+  {
+    // set the channel selection bits, but remove the most significant bit (bit 3)
+    sensor_channel -= 8;
+    // set MUX bit 5
+    *my_ADCSRB |= 0b00001000;
+  }
+  // set the channel selection bits
+  *my_ADMUX  += sensor_channel;
+}
+unsigned int water_sensor_read(unsigned char sensor_channel)
+{
+  //set VCC pin to high
+  *port_l |= (0x08);
+  delay(10);
+  // set bit 6 of ADCSRA to 1 to start a conversion
+  *my_ADCSRA |= 0x40;
+  // wait for the conversion to complete
+  while((*my_ADCSRA & 0x40) != 0);
+  // return the result in the ADC data register
+  return *my_ADC_DATA;
+  //set VCC pin to low
+  *port_l &= ~(0x08);
 }
 /*
 void RTCLog(DateTime time, volatile unsigned int transition) {
@@ -261,7 +299,13 @@ void Toggle () {
     state = 0;
   }
 }
-
+//Resets system to IDLE if in ERROR and water level high
+void Reset () {
+  if (state == 3 && water_sensor_read(water_sensor_channel) >= waterThreshold) {
+  state = 1;
+  millisDHT = 0;
+  }
+}
 //TESTING
 //LED'S: paste into loop func:
 /*
